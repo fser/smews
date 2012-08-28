@@ -1,0 +1,169 @@
+History of modification for integrating TLS in SMEWS
+
+Files Added:
+tls.h
+tls.c
+md5.h
+rc4.h
+sha1.h
+record.h
+record.c
+sha1.c
+md5.c
+rand.c
+
+Moved macros for getting data and externalized functions from input.c in input.h to be accessed also by tls.c
+Moved macros for getting data and externalized functions from output.c in output.h to be accessed also by tls.c
+
+Optimized Server Hello Done message. Now the message is precomputed and only the random is injected at runtime. Avoiding multiple
+calls to hash update.
+
+
+Files modified :
+-----------------
+
+-line 89, connections.h
+#ifndef DISABLE_HTTPS	
+	struct tls_connections *tls;
+	unsigned char tls_active: 1;
+#endif
+
+};
+
+input.c
+----------
+line 209
+		tmp_connection.tls_active = 0;
+
+-line 63
+#define HTTPS_PORT 443
+
+-line 248
+if(tmp_ui16[S1] != HTTP_PORT) {
+		/* check to see if it's TLS */
+		if(UI16(tmp_ui16) == HTTPS_PORT){
+			
+			if(tmp_connection.tcp_state == tcp_listen) {
+
+				/* if we expect a TLS connection allocate memory now */
+				tmp_connection.tls = mem_alloc(sizeof(struct tls_connection));
+
+				if(tmp_connection.tls != NULL){
+					(tmp_connection.tls)->tls_state = tls_listen;
+					tmp_connection.tls_active = 1;
+				} else {
+					return 1;
+				}
+			}
+
+		} else {
+			/* neither 80 nor 443 */
+#ifdef STACK_DUMP
+			DEV_PREPARE_OUTPUT(STACK_DUMP_SIZE);
+			for(stack_i = 0; stack_i < STACK_DUMP_SIZE ; stack_i++) {
+				DEV_PUT(stack_base[-stack_i]);
+			}
+			DEV_OUTPUT_DONE;
+#endif
+			return 1;
+		}
+
+	}
+
+
+
+
+
+-line 378
+/* TLS Handshake Layer processing*/
+if(segment_length && tmp_connection.tcp_state == tcp_established && tmp_connection.output_handler == NULL && tmp_connection.tls_active == 1) {
+		
+		/* TLS state machine management*/
+		switch(  (tmp_connection.tls)->tls_state ){
+
+			case tls_listen:
+			      if(tls_get_client_hello(tmp_connection.tls) == HNDSK_OK){
+				    (tmp_connection.tls)->tls_state = client_hello;
+
+			      }
+
+			case client_hello:
+
+			case server_hello:
+
+			default:
+			      break;	 	
+    
+
+		}
+
+
+
+	} else {
+		Simon's code for http request
+		}
+		
+
+
+
+output.c
+----------
+/* send TCP source port */
+	if(connection != NULL){
+		if(connection->tls_active == 1){
+			DEV_PUT16_VAL(TCP_HTTPS_PORT);
+		} else {
+			DEV_PUT16_VAL(TCP_HTTP_PORT);
+		}
+	} else {
+		DEV_PUT16_VAL(TCP_HTTP_PORT);
+	}
+
+if(connection != NULL){
+	if(connection->tls_active == 1){
+		checksum_add16(TCP_HTTPS_PORT);
+	} else {
+		checksum_add16(TCP_HTTP_PORT);
+	}
+} else {
+	checksum_add16(TCP_HTTP_PORT);
+}
+
+case type_tls_handshake:
+
+			switch(connection->tls->tls_state) {
+				case server_hello:
+					segment_length = TLS_HELLO_CERT_DONE_LEN;
+					break;
+
+			}
+			break;
+
+added same case in checksum calculation and sending content
+
+- changed TCP checksum
+
+handlers.h
+============
+added type_tls_handshake to handler type
+
+
+handlers.c
+===========
+CONST_VAR(struct output_handler_t, ref_tlshandshake) = {
+	.handler_type = type_tls_handshake,
+
+};
+
+
+TODO
+remove VLA\s from prf & p_hash or hmac replace with mem_alloc
+
+adaptarea hmac-ului si rc_crypt-ului
+adaptarea sequence-numberelor in legatura cu overhead-ul adus de TLS
+procedeul pentru send/receive e interesant din output.c case file
+folosesc un buffer pentru a aduce fila in memorie si a face operatiile tls-ului pe ea
+
+
+
+	
