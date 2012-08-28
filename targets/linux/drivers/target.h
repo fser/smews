@@ -42,7 +42,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/select.h>
-#include <stdio.h>
+
 /* Network drivers */
 
 extern void dev_init(void);
@@ -99,7 +99,6 @@ extern fd_set fdset;
 #define CONST_READ_UI16(x) (*((uint16_t*)(x)))
 #define CONST_READ_UI32(x) (*((uint32_t*)(x)))
 #define CONST_READ_ADDR(x) (*((void**)(x)))
-#define CONST_READ_NBYTES(dst,src,len) memcpy(dst,src,len)
 
 #define CONST_UI8(x) ((uint8_t)(x))
 #define CONST_UI16(x) ((uint16_t)(x))
@@ -107,6 +106,7 @@ extern fd_set fdset;
 #define CONST_ADDR(x) ((void*)(x))
 
 #define CONST_WRITE_NBYTES(dst,src,len) memcpy(dst,src,len)
+#define CONST_READ_NBYTES(dst,src,len) memcpy(dst,src,len)
 
 /* Endianness */
 
@@ -115,6 +115,35 @@ extern fd_set fdset;
 /* Context switching */
 
 #define USE_FRAME_POINTER
+
+#ifdef __x86_64__
+
+#define BACKUP_CTX(sp) \
+	asm ("mov %%rsp, %0" : "=r"((sp)[0])); \
+	asm ("mov %%rbp, %0" : "=r"((sp)[1])); \
+		
+#define RESTORE_CTX(sp) \
+	asm ("mov %0, %%rsp" :: "r"((sp)[0])); \
+	asm ("mov %0, %%rbp" :: "r"((sp)[1])); \
+
+
+#define PUSHREGS asm( \
+	"push	%rbx\n" \
+	"push	%r12\n" \
+	"push	%r13\n" \
+	"push	%r14\n" \
+	"push	%r15\n" \
+); \
+
+#define POPREGS asm( \
+	"pop	%r15\n" \
+	"pop	%r14\n" \
+	"pop	%r13\n" \
+	"pop	%r12\n" \
+	"pop	%rbx\n" \
+); \
+
+#else
 
 #define BACKUP_CTX(sp) \
 	asm ("movl %%esp, %0" : "=r"((sp)[0])); \
@@ -137,10 +166,12 @@ extern fd_set fdset;
 	"popl	%edi\n" \
 ); \
 
+#endif
+
 /* Smews configuration */
 
-#define OUTPUT_BUFFER_SIZE 2
+#define OUTPUT_BUFFER_SIZE 256
 #define STACK_SIZE 4*1024
-#define ALLOC_SIZE 64*1024
+#define ALLOC_SIZE 32*1024
 
 #endif /* __TARGET_H__ */
