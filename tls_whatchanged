@@ -85,3 +85,7 @@ Changes made
 - connection.h
     - Including "tls.h"
     - Adding tls_active field to http_rst_connection structure
+    - Adding tls_active, tls fields to connection structure
+
+- connection.c
+    - Adding TLS action in something_to_send function

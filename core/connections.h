@@ -133,8 +133,15 @@ struct connection {
 		struct http_connection http;
 	} protocol;
 
+
+#ifndef DISABLE_TLS
+	struct tls_connection *tls;
+	unsigned char tls_active: 1;
+#endif
+
 	struct connection *next;
 	struct connection *prev;
+
 #ifdef IPV6
 	unsigned char ip_addr[0];
 #endif
