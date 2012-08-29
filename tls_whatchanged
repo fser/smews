@@ -34,7 +34,7 @@ Files that differ
 changelogs.txt (unchanged)
 core/checksum.c (unchanged because all is inlined now)
 core/checksum.h (unchanged because all is inlined now)
-core/connections.c
+core/connections.c (changed)
 core/connections.h (changed)
 core/coroutines.c (unchanged)
 core/coroutines.h (unchanged)
@@ -62,9 +62,9 @@ targets/GBA/drivers/crt0.s
 targets/GBA/drivers/serial_line.c
 targets/klinux/drivers/target.h
 targets/klinux/SConscript
-targets/linux/drivers/hardware.c
-targets/linux/drivers/target.h
-targets/linux/SConscript
+targets/linux/drivers/hardware.c (unchanged)
+targets/linux/drivers/target.h (changed)
+targets/linux/SConscript (unchanged)
 targets/MicaZ/drivers/serial_line.c
 targets/MicaZ/drivers/target.h
 targets/MicaZ/SConscript
@@ -89,3 +89,7 @@ Changes made
 
 - connection.c
     - Adding TLS action in something_to_send function
+
+- linux/driver/target.h
+    - Adding CONST_READ_NBYTES macro
+
