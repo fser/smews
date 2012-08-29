@@ -1,23 +1,23 @@
 /*
 * Copyright or © or Copr. 2008, Simon Duquennoy
-*
+* 
 * Author e-mail: simon.duquennoy@lifl.fr
-*
+* 
 * This software is a computer program whose purpose is to design an
 * efficient Web server for very-constrained embedded system.
-*
+* 
 * This software is governed by the CeCILL license under French law and
-* abiding by the rules of distribution of free software.  You can  use,
+* abiding by the rules of distribution of free software.  You can  use, 
 * modify and/ or redistribute the software under the terms of the CeCILL
 * license as circulated by CEA, CNRS and INRIA at the following URL
-* "http://www.cecill.info".
-*
+* "http://www.cecill.info". 
+* 
 * As a counterpart to the access to the source code and  rights to copy,
 * modify and redistribute granted by the license, users are provided only
 * with a limited warranty  and the software's author,  the holder of the
 * economic rights,  and the successive licensors  have only  limited
-* liability.
-*
+* liability. 
+* 
 * In this respect, the user's attention is drawn to the risks associated
 * with loading,  using,  modifying and/or developing or reproducing the
 * software by the user in light of its specific status of free software,
@@ -25,10 +25,10 @@
 * therefore means  that it is reserved for developers  and  experienced
 * professionals having in-depth computer knowledge. Users are therefore
 * encouraged to load and test the software's suitability as regards their
-* requirements in conditions enabling the security of their systems and/or
-* data to be ensured and,  more generally, to use and operate it in the
-* same conditions as regards security.
-*
+* requirements in conditions enabling the security of their systems and/or 
+* data to be ensured and,  more generally, to use and operate it in the 
+* same conditions as regards security. 
+* 
 * The fact that you are presently reading this means that you have had
 * knowledge of the CeCILL license and that you accept its terms.
 */
@@ -42,6 +42,13 @@
 #include "coroutines.h"
 #include "blobs.h"
 #include "defines.h"
+
+#ifndef DISABLE_TLS
+	#include "tls.h"
+	#include "hmac.h"
+
+	#define HTTPS_PORT 443
+#endif
 
 /* Used to dump the runtime stack */
 #ifdef STACK_DUMP
@@ -63,6 +70,8 @@ extern CONST_VAR(struct output_handler_t, apps_httpCodes_404_html_handler);
 /* IP and TCP constants */
 #define HTTP_PORT 80
 #define IP_PROTO_TCP 6
+#define IP_HEADER_SIZE 20
+#define TCP_HEADER_SIZE 20
 
 /* TCP pre-calculated partial pseudo-header checksum (for incoming packets)*/
 #define TCP_PRECALC_CHECKSUM ((uint16_t)(0x0000ffff - (IP_PROTO_TCP - 0x15)))
@@ -492,12 +501,47 @@ char smews_receive(void) {
 		tmp_connection.protocol.http.post_data = NULL;
 		tmp_connection.protocol.http.post_url_detected = 0;
 #endif
+
+#ifndef DISABLE_TLS
+		tmp_connection.tls_active = 0;
+#endif
+
 	}
 
 	/* get and check the destination port */
 
 	DEV_GETC16(tmp_ui16);
 	if(tmp_ui16[S1] != HTTP_PORT) {
+
+#ifndef DISABLE_TLS
+		/* check to see if it's TLS */
+		if(UI16(tmp_ui16) == HTTPS_PORT){
+			
+			/* a TLS connection will always(?) be established on a new TCP connection */
+			if(tmp_connection.protocol.http.tcp_state == tcp_listen) {
+
+				/* allocate memory for new TLS connection */
+				tmp_connection.tls = mem_alloc(sizeof(struct tls_connection));
+
+				if(tmp_connection.tls != NULL){
+					/* first message should be client hello */
+					(tmp_connection.tls)->tls_state = client_hello;
+					(tmp_connection.tls)->parsing_state = parsing_hdr;
+					tmp_connection.tls_active = 1;
+
+				} else {
+#ifdef DEBUG_TLS
+					DEBUG_MSG("Error allocating memory for new TLS connection");
+#endif
+					return 1;
+				}
+			}
+
+		} else
+#endif
+		{
+
+			/* neither 80 nor 443 */
 #ifdef STACK_DUMP
 		DEV_PREPARE_OUTPUT(STACK_DUMP_SIZE);
 		for(stack_i = 0; stack_i < STACK_DUMP_SIZE ; stack_i++) {
@@ -506,6 +550,8 @@ char smews_receive(void) {
 		DEV_OUTPUT_DONE;
 #endif
 		return 1;
+
+		}
 	}
 
 	/* get TCP sequence number */
@@ -634,16 +680,89 @@ char smews_receive(void) {
 
 	/* End of TCP, starting HTTP */
 	x = 0;
-	if(segment_length && tmp_connection.protocol.http.tcp_state == tcp_established && (new_tcp_data || tmp_connection.output_handler == NULL)) {
-		const struct output_handler_t * /*CONST_VAR*/ output_handler = NULL;
+	/*	if(segment_length && tmp_connection.protocol.http.tcp_state == tcp_established && (new_tcp_data || tmp_connection.output_handler == NULL)) 
+		{ fser */
 
-		/* parse the eventual GET request */
-		unsigned const char * /*CONST_VAR*/ blob;
-		unsigned char blob_curr;
-#ifndef DISABLE_ARGS
-		struct arg_ref_t tmp_arg_ref = {0,0,0};
-		uint16_t tmp_args_size_ref;
+#ifndef DISABLE_TLS
+	/* TLS Handshake Layer processing*/
+	if(segment_length &&
+			tmp_connection.protocol.http.tcp_state == tcp_established &&
+			tmp_connection.output_handler == NULL &&
+			tmp_connection.tls_active == 1 &&
+			(tmp_connection.tls)->tls_state != established ) {
+
+
+/* TLS state machine management*/
+	switch(  (tmp_connection.tls)->tls_state ){
+
+	case client_hello:
+
+	  if(tls_get_client_hello(tmp_connection.tls) == HNDSK_OK){
+	    (tmp_connection.tls)->tls_state = server_hello;
+	    tmp_connection.output_handler = &ref_tlshandshake;
+	    x+= segment_length;
+	  }
+
+	  if(segment_length == x)
+	    break;
+
+
+	case key_exchange:
+	  
+	  if(tls_get_client_keyexch(tmp_connection.tls) == HNDSK_OK){
+	    (tmp_connection.tls)->tls_state = ccs_recv;
+	    x+= TLS1_ECDH_ECDSA_WITH_RC4_128_SHA_KEXCH_LEN + TLS_RECORD_HEADER_LEN;
+	  }
+	  
+	  if(segment_length == x )
+	    break;
+	  
+	case ccs_recv:
+	  
+	  if(tls_get_change_cipher(tmp_connection.tls) == HNDSK_OK){
+	    (tmp_connection.tls)->tls_state = fin_recv;
+	  }
+	  x+= TLS_CHANGE_CIPHER_SPEC_LEN;
+	  if(segment_length == x )
+	    break;
+	  
+	case fin_recv:
+	  
+	  
+	  if(tls_get_finished(tmp_connection.tls) == HNDSK_OK){
+	    (tmp_connection.tls)->tls_state = ccs_fin_send;
+	    tmp_connection.output_handler = &ref_tlshandshake;
+	  }
+	  
+	  x+= TLS_FINISHED_MSG_LEN + TLS_RECORD_HEADER_LEN;
+	  if(segment_length == x )
+	    break;
+	  
+	  
+	}
+
+
+	} else {
+
 #endif
+
+
+#ifdef DEBUG_TLS
+		DEBUG_VAR(segment_length,"%d bytes \n", "Received TCP Segment: ")
+#endif
+		  /* TLS record layer operation if TLS active */
+		  if(segment_length && tmp_connection.protocol.http.tcp_state == tcp_established 
+		     && (new_tcp_data || tmp_connection.output_handler == NULL)) {
+		    
+		    /* parse the eventual GET request */
+		    unsigned const char * /*CONST_VAR*/ blob;
+		    unsigned char blob_curr;
+#ifndef DISABLE_ARGS
+		    struct arg_ref_t tmp_arg_ref = {0,0,0};
+		    uint16_t tmp_args_size_ref;
+#endif
+
+		const struct output_handler_t * /*CONST_VAR*/ output_handler = NULL;
 
 		if(tmp_connection.protocol.http.parsing_state == parsing_out) {
 #ifndef DISABLE_ARGS
@@ -679,6 +798,27 @@ char smews_receive(void) {
 #endif
 				) {
 			blob_curr = CONST_READ_UI8(blob);
+
+#ifndef DISABLE_TLS
+			if(tmp_connection.tls_active == 1){
+			  
+			  if((tmp_connection.tls)->parsing_state == parsing_hdr){
+			    
+			    x+=5;
+			    /* TODO parse ALERT TYPE */
+			    if( ((tmp_connection.tls)->record_size = read_header(TLS_CONTENT_TYPE_APPLICATION_DATA)) == HNDSK_ERR){
+			      break;
+			    }
+			    /* preparing the HMAC hash for calculation */
+			    hmac_init(SHA1,(tmp_connection.tls)->client_mac,SHA1_KEYSIZE);
+			    hmac_preamble(tmp_connection.tls, (tmp_connection.tls)->record_size - MAC_KEYSIZE, DECODE);
+			    
+			    (tmp_connection.tls)->parsing_state = parsing_data;
+			    continue;
+			  }
+			}
+#endif
+
 #ifndef DISABLE_POST
 			/* testing end multipart */
 			if(tmp_connection.protocol.http.post_data
@@ -693,6 +833,31 @@ char smews_receive(void) {
 #endif
 				x++;
 				DEV_GETC(tmp_char);
+
+#ifndef DISABLE_TLS
+				/* record data parsing */
+				if(tmp_connection.tls_active == 1){
+
+				  /* decrypt current byte */
+				  rc4_crypt(&tmp_char,MODE_DECRYPT);
+
+				  /* updating remaining bytes to parse from payload of the current record */
+				  (tmp_connection.tls)->record_size--;
+
+				  if((tmp_connection.tls)->parsing_state == parsing_data){
+
+				    hmac_update(tmp_char);
+
+				    /* entering MAC portion */
+				    if((tmp_connection.tls)->record_size == MAC_KEYSIZE){
+				      (tmp_connection.tls)->parsing_state = parsing_mac;
+				      hmac_finish(SHA1);
+				    }
+
+				  }
+				}
+#endif
+
 #ifndef DISABLE_POST
 				/* updating content length */
 				if((tmp_connection.protocol.http.parsing_state == parsing_init_buffer
@@ -1271,8 +1436,19 @@ char smews_receive(void) {
 			if(tmp_connection.protocol.http.parsing_state != parsing_cmd) {
 				tmp_connection.output_handler = output_handler;
 				UI32(tmp_connection.protocol.http.next_outseqno) = UI32(current_inack);
+				/* calculate the final seqno for the stream we have to send on this output handler */
 				if(CONST_UI8(output_handler->handler_type) == type_file) {
 					UI32(tmp_connection.protocol.http.final_outseqno) = UI32(tmp_connection.protocol.http.next_outseqno) + CONST_UI32(GET_FILE(output_handler).length);
+#ifndef DISABLE_TLS
+					if(tmp_connection.tls_active == 1){
+					  /* add the overhead of TLS (MAC + record header) */
+					  //printf("\nfinal out seq no before adding TLS overhead: %d \n",UI32(tmp_connection.final_outseqno));
+					  /* was connection.protocol ... fser */
+					  UI32(tmp_connection.protocol.http.final_outseqno) += ((CONST_UI32(GET_FILE(output_handler).length) +  MAX_OUT_SIZE((uint16_t)tmp_connection.protocol.http.tcp_mss) - 1) / MAX_OUT_SIZE((uint16_t)tmp_connection.protocol.http.tcp_mss)) * (TLS_OVERHEAD);
+					  //printf("final out seq no after adding TLS overhead: %d \n",UI32(tmp_connection.final_outseqno));
+					}
+#endif
+
 				} else {
 					UI32(tmp_connection.protocol.http.final_outseqno) = UI32(tmp_connection.protocol.http.next_outseqno) - 1;
 				}
@@ -1330,12 +1506,69 @@ char smews_receive(void) {
 				tmp_connection.protocol.http.blob = blob;
 		}
 	}
+
+#ifndef DISABLE_TLS
+	} /* else */
+#endif
 	/* drop remaining TCP data */
-	while(x++ < segment_length)
+	while(x++ < segment_length){ /* added by fser */
 		DEV_GETC(tmp_char);
+
+#ifndef DISABLE_TLS
+	/* entering MAC portion */
+	if(tmp_connection.tls_active == 1){
+	  
+	  rc4_crypt(&tmp_char,MODE_DECRYPT);
+	  
+	  /* updating remaining bytes to parse from the current record */
+	  (tmp_connection.tls)->record_size--;
+	  
+	  if((tmp_connection.tls)->parsing_state == parsing_mac){
+	    
+	    if(sha1.buffer[MAC_KEYSIZE - (tmp_connection.tls)->record_size - 1] != tmp_char){
+	      tmp_connection.output_handler = NULL;
+
+#ifdef DEBUG_TLS
+
+	      //TODO here must just do dev_get till the end or maybe return, it's fatal, alert ?
+	      DEBUG_MSG("Bad MAC for record");
+	      return 1;
+#endif
+	    } else {
+	      /* finished MAC parsing and checking */
+
+					if((tmp_connection.tls)->record_size == 0){
+
+						/* prepare header parsing for next record */
+#ifdef DEBUG_TLS
+						DEBUG_MSG("MAC is good for the received record");
+#endif
+						(tmp_connection.tls)->parsing_state = parsing_hdr;
+
+						/* Increment decode sequence number because we have finished parsing a record */
+						(tmp_connection.tls)->decode_seq_no.long_int++;
+					}
+
+				}
+
+			} else {
+				hmac_update(tmp_char);
+
+				if((tmp_connection.tls)->record_size == MAC_KEYSIZE){
+					(tmp_connection.tls)->parsing_state = parsing_mac;
+					hmac_finish(SHA1);
+
+				}
+			}
+	}
+#endif
+	} /* End of while */
 
 	/* acknowledge received and processed TCP data if no there is no current output_handler */
 	if(!tmp_connection.output_handler && tmp_connection.protocol.http.tcp_state == tcp_established && segment_length) {
+#ifdef DEBUG_TLS
+		DEBUG_MSG("Sending VOID ACKNOWLEDGEMENT\n");
+#endif
 		tmp_connection.output_handler = &ref_ack;
 	}
 
@@ -1389,5 +1622,13 @@ char smews_receive(void) {
 			}
 		}
 	}
+
+#ifdef DEBUG_TLS
+	else {
+		//TODO erase this else
+		DEBUG_MSG("TCP Checksum not good");
+	}
+#endif
+
 	return 1;
 }
