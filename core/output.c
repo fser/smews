@@ -1,23 +1,23 @@
 /*
 * Copyright or © or Copr. 2008, Simon Duquennoy
-*
+* 
 * Author e-mail: simon.duquennoy@lifl.fr
-*
+* 
 * This software is a computer program whose purpose is to design an
 * efficient Web server for very-constrained embedded system.
-*
+* 
 * This software is governed by the CeCILL license under French law and
-* abiding by the rules of distribution of free software.  You can  use,
+* abiding by the rules of distribution of free software.  You can  use, 
 * modify and/ or redistribute the software under the terms of the CeCILL
 * license as circulated by CEA, CNRS and INRIA at the following URL
-* "http://www.cecill.info".
-*
+* "http://www.cecill.info". 
+* 
 * As a counterpart to the access to the source code and  rights to copy,
 * modify and redistribute granted by the license, users are provided only
 * with a limited warranty  and the software's author,  the holder of the
 * economic rights,  and the successive licensors  have only  limited
-* liability.
-*
+* liability. 
+* 
 * In this respect, the user's attention is drawn to the risks associated
 * with loading,  using,  modifying and/or developing or reproducing the
 * software by the user in light of its specific status of free software,
@@ -25,10 +25,10 @@
 * therefore means  that it is reserved for developers  and  experienced
 * professionals having in-depth computer knowledge. Users are therefore
 * encouraged to load and test the software's suitability as regards their
-* requirements in conditions enabling the security of their systems and/or
-* data to be ensured and,  more generally, to use and operate it in the
-* same conditions as regards security.
-*
+* requirements in conditions enabling the security of their systems and/or 
+* data to be ensured and,  more generally, to use and operate it in the 
+* same conditions as regards security. 
+* 
 * The fact that you are presently reading this means that you have had
 * knowledge of the CeCILL license and that you accept its terms.
 */
@@ -43,6 +43,12 @@
 #include "memory.h"
 #include "input.h" /* for *_HEADER_SIZE defines */
 #include "handlers.h"
+#include "random.h"
+
+#ifndef DISABLE_TLS
+	#include "tls.h"
+	#include "hmac.h"
+#endif
 
 #ifndef DISABLE_POST
 	#include "defines.h"
@@ -63,13 +69,21 @@
 #define IP_OFFSET 0x0000
 #define IP_TTL_PROTOCOL 0x4006
 #define TCP_SRC_PORT 0x0050
+#define TCP_HTTP_PORT 80
+#define TCP_HTTPS_PORT 443
 #define TCP_WINDOW 0x1000
 #define TCP_URGP 0x0000
 
 /* Pre-calculated partial IP checksum (for outgoing packets) */
 #define BASIC_IP_CHK 0x8506
+
 /* Pre-calculated partial TCP checksum (for outgoing packets) */
-#define BASIC_TCP_CHK 0x1056
+#ifndef DISABLE_TLS
+	/* Constant parts are : Window + IP_PROTO_TCP(6) */
+	#define BASIC_TCP_CHK 0x1006
+#else
+	#define BASIC_TCP_CHK 0x1056
+#endif
 
 /* Maximum output size depending on the MSS */
 #define MAX_OUT_SIZE(mss) ((mss) & (~0 << (CHUNCKS_NBITS)))
@@ -212,8 +226,21 @@ void smews_send_packet(struct connection *connection) {
 	const struct output_handler_t * /*CONST_VAR*/ output_handler;
 	enum handler_type_e handler_type;
 	/* buffer used to store the current content-length */
-
+	#define CONTENT_LENGTH_SIZE 6 /* fser */
+	#define CHUNK_LENGTH_SIZE 4   /* fser */
 	char content_length_buffer[CONTENT_LENGTH_SIZE];
+	unsigned char source_port[2];
+
+
+#ifndef DISABLE_TLS
+	/* used to construct TLS record */
+	uint8_t *tls_record;
+	//uint16_t record_length;
+
+	/* shameless variable TODO revise */
+	uint8_t *record_buffer;
+#endif
+
 #ifdef IPV6
 	/* Full IPv6 adress of the packet */
 	unsigned char full_ipv6_addr[16];
@@ -240,12 +267,22 @@ void smews_send_packet(struct connection *connection) {
 			current_inseqno = connection->protocol.http.current_inseqno;
 		}
 		output_handler = connection->output_handler;
+		if(connection->tls_active == 1){
+			UI16(source_port) = TCP_HTTPS_PORT;
+		} else {
+			UI16(source_port) = TCP_HTTP_PORT;
+		}
 	} else {
 		ip_addr = rst_connection.ip_addr;
 		port = rst_connection.port;
 		next_outseqno = rst_connection.next_outseqno;
 		current_inseqno = rst_connection.current_inseqno;
 		output_handler = &ref_rst;
+		if(rst_connection.tls_active == 1){
+			UI16(source_port) = TCP_HTTPS_PORT;
+		} else {
+			UI16(source_port) = TCP_HTTP_PORT;
+		}
 	}
 	handler_type = CONST_UI8(output_handler->handler_type);
 
@@ -261,6 +298,18 @@ void smews_send_packet(struct connection *connection) {
 			file_remaining_bytes = UI32(connection->protocol.http.final_outseqno) - UI32(next_outseqno);
 			segment_length = file_remaining_bytes > max_out_size ? max_out_size : file_remaining_bytes;
 			index_in_file = CONST_UI32(GET_FILE(output_handler).length) - file_remaining_bytes;
+
+#ifndef DISABLE_TLS
+			if(connection->tls_active == 1){
+
+				/* we reposition taking in account that remaining_bytes contains all TLS OVERHEAD */
+				index_in_file = CONST_UI32(GET_FILE(output_handler).length) -
+						(file_remaining_bytes - TLS_OVERHEAD*((file_remaining_bytes +  MAX_OUT_SIZE((uint16_t)connection->protocol.http.tcp_mss) - 1) / MAX_OUT_SIZE((uint16_t)connection->protocol.http.tcp_mss)));
+				//printf("index in file %d\n",index_in_file);
+
+			}
+#endif
+
 			break;
 		}
 		case type_generator:
@@ -273,6 +322,25 @@ void smews_send_packet(struct connection *connection) {
 			 * the trick is used so that the code below can be reused
 			 */
 			segment_length = curr_output.content_length - TCP_HEADER_SIZE;
+			break;
+#endif
+
+#ifndef DISABLE_TLS
+		case type_tls_handshake:
+
+			switch(connection->tls->tls_state) {
+				case server_hello:
+					/* todo limitation of mss discuss(fie las asa ceea ce nu ar putea fi o pb, fie il fac dynamic content) */
+					segment_length = TLS_HELLO_CERT_DONE_LEN;
+					break;
+
+				/* sending the CCS & Finished message in one segment */
+				case ccs_fin_send:
+					segment_length = TLS_CHANGE_CIPHER_SPEC_LEN + TLS_FINISHED_MSG_LEN + TLS_RECORD_HEADER_LEN;
+					break;
+
+			}
+
 			break;
 #endif
 	}
@@ -372,7 +440,7 @@ void smews_send_packet(struct connection *connection) {
 	/* start to send TCP header */
 
 	/* send TCP source port */
-	DEV_PUT16_VAL(TCP_SRC_PORT);
+	DEV_PUT16(source_port);
 
 	/* send TCP destination port */
 	DEV_PUT16(port);
@@ -393,6 +461,7 @@ void smews_send_packet(struct connection *connection) {
 	/* complete precalculated TCP checksum */
 
 	checksum_init();
+	/* start to construct TCP checksum starting from a precalculated value */
 	UI16(current_checksum) = BASIC_TCP_CHK;
 #ifdef IPV6
 	checksum_add32(&local_ip_addr[0]);
@@ -419,6 +488,10 @@ void smews_send_packet(struct connection *connection) {
 	checksum_add32(ip_addr);
 #endif
 
+	/* checksum source port */
+	checksum_add16(UI16(source_port));
+	
+	/* checksum destination port */
 	checksum_add16(UI16(port));
 
 	checksum_add32(current_inseqno);
@@ -475,23 +548,116 @@ void smews_send_packet(struct connection *connection) {
 			}
 			break;
 		case type_file: {
-			uint16_t i;
-			uint32_t tmp_sum = 0;
-			uint16_t *tmpptr = (uint16_t *)CONST_ADDR(GET_FILE(output_handler).chk) + DIV_BY_CHUNCKS_SIZE(index_in_file);
+			#ifndef DISABLE_TLS
+			if(connection->tls_active == 1){
+				uint16_t i;
+				uint16_t data_length = segment_length - TLS_OVERHEAD;
+				const char *tmpptr = (const char*)(CONST_ADDR(GET_FILE(output_handler).data) + index_in_file);
+				tls_record = mem_alloc(data_length);
+				tls_record = CONST_READ_NBYTES(tls_record,tmpptr,data_length);
 
-			for(i = 0; i < GET_NB_BLOCKS(segment_length); i++) {
-				tmp_sum += CONST_READ_UI16(tmpptr++);
+				//printf("Sending %d from a total of %d static file\n",data_length,(output_handler->handler_contents).file.length);
+				/*printf("\n\nTCP data before sending (part of file contents) (%d bytes) :",data_length);
+				for (i = 0 ; i < data_length; i++){
+					printf("%02x", tls_record[i]);
+				}
+				printf("\n");*/
+
+				/* preparing the HMAC hash for calculation */
+				hmac_init(SHA1,connection->tls->server_mac,SHA1_KEYSIZE);
+				hmac_preamble(connection->tls, data_length, ENCODE);
+
+				/* checksuming TLS Record header */
+				checksum_add(TLS_CONTENT_TYPE_APPLICATION_DATA);
+				checksum_add(TLS_SUPPORTED_MAJOR);
+				checksum_add(TLS_SUPPORTED_MINOR);
+				checksum_add((data_length + MAC_KEYSIZE) >> 8);
+				checksum_add((uint8_t)(data_length + MAC_KEYSIZE));
+
+				/* Hash, encrypt and checksum data */
+				for(i = 0; i < data_length; i++){
+					//diferenta s-ar putea sa fie la marimea cat fac hmac
+					hmac_update(tls_record[i]);
+					rc4_crypt(&tls_record[i],MODE_ENCRYPT);
+					checksum_add(tls_record[i]);
+
+				}
+				hmac_finish(SHA1);
+
+				/* checksuming MAC */
+				for(i = 0; i < MAC_KEYSIZE; i++){
+					rc4_crypt(&sha1.buffer[i],MODE_ENCRYPT);
+					checksum_add(sha1.buffer[i]);
+				}
+
+
+			} else
+#endif
+			{
+				uint16_t i;
+				uint32_t tmp_sum = 0;
+				uint16_t *tmpptr = (uint16_t *)CONST_ADDR(GET_FILE(output_handler).chk) + DIV_BY_CHUNCKS_SIZE(index_in_file);
+
+				for(i = 0; i < GET_NB_BLOCKS(segment_length); i++) {
+					tmp_sum += CONST_READ_UI16(tmpptr++);
+				}
+				checksum_add32((const unsigned char*)&tmp_sum);
+				break;
 			}
-			checksum_add32((const unsigned char*)&tmp_sum);
-			break;
 		}
-		default: /* Should never happen but avoids compile warnings */
-			return;
-	}
+#ifndef DISABLE_TLS
+		case type_tls_handshake:
 
+			switch(connection->tls->tls_state) {
+				uint16_t i;
+				case server_hello:
+
+					init_rand(0xABCDEF12); /* TODO move random init somewhere else */
+					rand_next(connection->tls->server_random.lfsr_int);
+
+					/* checksumming handshake records
+					 * TODO this should be precalculated */
+					for(i = 0; i < TLS_HELLO_CERT_DONE_LEN - 32; i++) {
+						checksum_add(s_hello_cert_done[i]);
+					}
+
+					/* checksumming random value */
+					for(i = 0; i < 32 ; i++){
+						checksum_add(connection->tls->server_random.lfsr_char[i]);
+					}
+
+
+					break;
+
+				case ccs_fin_send:
+					/* calculating checksum for CCS */
+					for(i = 0; i < TLS_CHANGE_CIPHER_SPEC_LEN; i++) {
+						checksum_add(tls_ccs_msg[i]);
+					}
+					/* calculating checksum for Finished message */
+					record_buffer = mem_alloc(TLS_FINISHED_MSG_LEN + START_BUFFER);
+					build_finished(connection->tls,record_buffer);
+					checksum_add(TLS_CONTENT_TYPE_HANDSHAKE);
+					checksum_add(TLS_SUPPORTED_MAJOR);
+					checksum_add(TLS_SUPPORTED_MINOR);
+					checksum_add(0);
+					checksum_add(TLS_FINISHED_MSG_LEN);
+					for(i = 0; i < TLS_FINISHED_MSG_LEN; i++)
+						checksum_add(record_buffer[START_BUFFER + i]);
+
+					break;
+
+
+
+			}
+			break;
+#endif
+
+	}
+	
 	checksum_end();
 
-	/* send TCP checksum */
+	/* send TCP checksum (complemented)*/
 	DEV_PUT16_VAL(~UI16(current_checksum));
 
 	/* send TCP urgent pointer */
@@ -527,26 +693,97 @@ void smews_send_packet(struct connection *connection) {
 			break;
 		case type_file: {
 			/* Send the payload of the packet */
-			const char *tmpptr = (const char*)(CONST_ADDR(GET_FILE(output_handler).data) + index_in_file);
-			DEV_PUTN_CONST(tmpptr, segment_length);
-			break;
-		}
+#ifndef DISABLE_TLS
+			if(connection->tls_active == 1){
+
+				uint16_t i;
+				uint16_t record_len = segment_length - TLS_RECORD_HEADER_LEN;
+				/* sending TLS Record Header */
+				DEV_PUT(TLS_CONTENT_TYPE_APPLICATION_DATA);
+				DEV_PUT(TLS_SUPPORTED_MAJOR);
+				DEV_PUT(TLS_SUPPORTED_MINOR);
+				DEV_PUT((record_len) >> 8);
+				DEV_PUT((uint8_t)(record_len));
+
+				/* sending TLS Payload */
+				//printf("Sending TLS data to network (%d bytes)\n ",record_len);
+				for(i = 0; i < (record_len - MAC_KEYSIZE); i++){
+					DEV_PUT(tls_record[i]);
+					//printf("%02x",tls_record[i]);
+				}
+
+				/* sending MAC */
+				for(i = 0; i < MAC_KEYSIZE; i++){
+					DEV_PUT(sha1.buffer[i]);
+					//printf("%02x",sha1.buffer[i]);
+				}
+				//printf("\n");
+
+				/* free payload allocated for bringing data from external memory */
+				mem_free(tls_record, record_len - MAC_KEYSIZE);
+
+				/* update number of record sent */
+				connection->tls->encode_seq_no.long_int++;
+
+			} else
+
+#endif
+			{
+				const char *tmpptr = (const char*)(CONST_ADDR(GET_FILE(output_handler).data) + index_in_file);
+				DEV_PUTN_CONST(tmpptr, segment_length);
+				break;
+			}
+			// fser		}
 		default: /* Should never happen but avoid warnings*/
 			return;
 	}
 
+#ifndef DISABLE_TLS
+		case type_tls_handshake:
+
+			switch(connection->tls->tls_state) {
+				case server_hello:
+					tls_send_hello_cert_done(connection->tls);
+					connection->tls->tls_state = key_exchange;
+					break;
+
+				case ccs_fin_send:
+
+					tls_send_change_cipher(connection->tls);
+					tls_send_finished(record_buffer + START_BUFFER);
+
+					connection->tls->tls_state = established;
+					mem_free(record_buffer,TLS_FINISHED_MSG_LEN + START_BUFFER);
+					break;
+			}
+#endif
+
+	}
+	
 	/* update next sequence number and inflight segments */
 	if(GET_FLAGS(output_handler) & TCP_SYN) {
 		UI32(connection->protocol.http.next_outseqno)++;
 	} else if(connection) {
 		UI32(connection->protocol.http.next_outseqno) += segment_length;
+#ifndef DISABLE_TLS
+		//if(connection->tls_active == 1) UI32(connection->protocol.http.next_outseqno)+= MAC_KEYSIZE + TLS_RECORD_HEADER_LEN;
+#endif
 		UI16(connection->protocol.http.inflight) += segment_length;
+#ifndef DISABLE_TLS
+		//if(connection->tls_active == 1) UI16(connection->inflight) += MAC_KEYSIZE + TLS_RECORD_HEADER_LEN;
+#endif
+
 		if(handler_type == type_generator) {
 			if(curr_output.service_header == header_standard || curr_output.content_length == 0) {
 				/* set final_outseqno as soon as it is known */
 				UI32(connection->protocol.http.final_outseqno) = UI32(connection->protocol.http.next_outseqno);
 			}
 		}
+	}
+
+	if(handler_type==type_generator){
+		static int cpt=0;
+		if(++cpt==2)return;
 	}
 
 	DEV_OUTPUT_DONE;
@@ -661,6 +898,12 @@ char smews_send(void) {
 		case type_file:
 			smews_send_packet(connection);
 			break;
+#ifndef DISABLE_TLS
+		case type_tls_handshake:
+			smews_send_packet(connection);
+			connection->output_handler = NULL;
+			break;
+#endif
 		case type_generator: {
 			char is_persistent;
 			char is_retransmitting;
