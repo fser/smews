@@ -93,3 +93,6 @@ Changes made
 - linux/driver/target.h
     - Adding CONST_READ_NBYTES macro
 
+
+- input.c|h
+    - Moving DEV_GETC macro to input.h
