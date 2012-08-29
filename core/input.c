@@ -83,7 +83,7 @@ extern CONST_VAR(struct output_handler_t, apps_httpCodes_404_html_handler);
 #endif
 
 /* gets 16 bits and checks if nothing wrong appened */
-static char dev_get16(unsigned char *word) {
+char dev_get16(unsigned char *word) {
 	int16_t tmp;
 	DEV_GET(tmp);
 	if(tmp == -1)
@@ -97,7 +97,7 @@ static char dev_get16(unsigned char *word) {
 }
 
 /* gets 16 bits and checks if nothing wrong appened */
-static char dev_get32(unsigned char *dword) {
+char dev_get32(unsigned char *dword) {
 	if(dev_get16(&dword[2]) == -1)
 		return -1;
 	if(dev_get16(&dword[0]) == -1)

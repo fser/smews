@@ -96,3 +96,8 @@ Changes made
 
 - input.c|h
     - Moving DEV_GETC macro to input.h
+    - Static functions removed
+
+- output.c|h
+    - Moving DEV_PUTC macro to output.h
+    - Static functions removed

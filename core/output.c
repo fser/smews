@@ -113,28 +113,22 @@ struct curr_output_t {
 static struct curr_output_t curr_output;
 
 /* default DEV_PUT16 */
-#ifndef DEV_PUT16
-static void dev_put16(unsigned char *word) {
+void dev_put16(unsigned char *word) {
 	DEV_PUT(word[1]);
 	DEV_PUT(word[0]);
 }
-	#define DEV_PUT16(w) dev_put16(w)
-#endif
 
-static void dev_put16_val(uint16_t word) {
+void dev_put16_val(uint16_t word) {
 	DEV_PUT(word >> 8);
 	DEV_PUT(word);
 }
-#define DEV_PUT16_VAL(w) dev_put16_val(w)
 
 /* default DEV_PUT32 */
-#ifndef DEV_PUT32
-static void dev_put32(unsigned char *dword) {
+void dev_put32(unsigned char *dword) {
 	DEV_PUT16(dword+2);
 	DEV_PUT16(dword);
 }
 	#define DEV_PUT32(dw) dev_put32(dw)
-#endif
 
 #ifdef IPV6
 static void dev_put32_val(uint32_t word) {
