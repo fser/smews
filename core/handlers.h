@@ -100,6 +100,7 @@ extern CONST_VAR(struct output_handler_t, ref_synack);
 extern CONST_VAR(struct output_handler_t, ref_ack);
 extern CONST_VAR(struct output_handler_t, ref_finack);
 extern CONST_VAR(struct output_handler_t, ref_rst);
+extern CONST_VAR(struct output_handler_t, ref_tlshandshake);
 
 
 /** URLs arguments **/
@@ -124,6 +125,10 @@ struct arg_ref_t {
 /* handler structure to be served */
 struct output_handler_t {
 	enum handler_type_e {type_control, type_file, type_generator
+#ifndef DISABLE_TLS
+		, type_tls_handshake
+#endif
+
 #ifndef DISABLE_GP_IP_HANDLER /* This type of handler handle a network protocol above IP (ICMP for instance) */
 	, type_general_ip_handler
 #endif

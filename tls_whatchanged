@@ -40,8 +40,8 @@ core/coroutines.c (unchanged)
 core/coroutines.h (unchanged)
 core/generators.c (unchanged)
 core/generators.h (unchanged)
-core/handlers.c
-core/handlers.h
+core/handlers.c (changed)
+core/handlers.h (changed)
 core/input.c
 core/input.h
 core/main.c (unchanged)
@@ -101,3 +101,7 @@ Changes made
 - output.c|h
     - Moving DEV_PUTC macro to output.h
     - Static functions removed
+
+- handler.c|h
+    - Adding a CONSTVAR ref_tlshandshake
+    - Adding type_tls_handshake field to output_handler_t structure
