@@ -28,15 +28,18 @@ tools/GenContents.py (changed: rename structure/variables name)
 
 Files that differ
 -----------------
-changelogs.txt
+
+**unchanged means we keep the 'develop' version**
+
+changelogs.txt (unchanged)
 core/checksum.c (unchanged because all is inlined now)
 core/checksum.h (unchanged because all is inlined now)
 core/connections.c
-core/connections.h
-core/coroutines.c
-core/coroutines.h
-core/generators.c
-core/generators.h
+core/connections.h (changed)
+core/coroutines.c (unchanged)
+core/coroutines.h (unchanged)
+core/generators.c (unchanged)
+core/generators.h (unchanged)
 core/handlers.c
 core/handlers.h
 core/input.c
@@ -48,9 +51,9 @@ core/output.c
 core/output.h
 core/smews.c (unchanged)
 core/smews.h (unchanged)
-doc/SConscript
-doc/userguide.tex
-README
+doc/SConscript (unchanged)
+doc/userguide.tex (unchanged - maybe it should be rechecked for doc)
+README (unchanged - maybe it should be rechecked for doc)
 SConscript
 SConstruct
 targets/Funcard7/drivers/target.h
@@ -78,3 +81,7 @@ Changes made
         - Edit tools/GenContents.py (renamed files_index to resources_index)
     - Structure *init_service_func_t* (tls) renamed *generator_init_func_t* (develop)
         - Edit tools/GenContents.py (renamed to generator_init_func_t)
+
+- connection.h
+    - Including "tls.h"
+    - Adding tls_active field to http_rst_connection structure
