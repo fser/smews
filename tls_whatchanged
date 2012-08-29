@@ -24,7 +24,7 @@ core/srv_consts.c
 core/tls.c
 core/tls.h
 tls_integration
-tools/GenContents.py (changed: rename structure/variables name)
+tools/GenContents.py (removed: Now named GenApps)
 
 Files that differ
 -----------------
@@ -54,7 +54,7 @@ core/smews.h (unchanged)
 doc/SConscript (unchanged)
 doc/userguide.tex (unchanged - maybe it should be rechecked for doc)
 README (unchanged - maybe it should be rechecked for doc)
-SConscript
+SConscript (unchanged)
 SConstruct
 targets/Funcard7/drivers/target.h
 targets/Funcard7/SConscript
