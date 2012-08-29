@@ -46,8 +46,8 @@ core/memory.c (unchanged, new function in develop branch)
 core/memory.h (unchanged, new function in develop branch)
 core/output.c
 core/output.h
-core/smews.c
-core/smews.h
+core/smews.c (unchanged)
+core/smews.h (unchanged)
 doc/SConscript
 doc/userguide.tex
 README
@@ -78,4 +78,3 @@ Changes made
         - Edit tools/GenContents.py (renamed files_index to resources_index)
     - Structure *init_service_func_t* (tls) renamed *generator_init_func_t* (develop)
         - Edit tools/GenContents.py (renamed to generator_init_func_t)
-
