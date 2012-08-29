@@ -249,7 +249,7 @@ def generateServiceContent(srcFile,dstFile,dstFileInfos):
 		generatedOutputHandler = '/********** Output handler **********/\n'
 		# handler functions declaration
 		if dstFileInfos.has_key('init'):
-			generatedOutputHandler += 'static init_service_func_t ' + dstFileInfos['init'] + ';\n'
+			generatedOutputHandler += 'static generator_init_func_t ' + dstFileInfos['init'] + ';\n'
 		if dstFileInfos.has_key('initGet'):
 			generatedOutputHandler += 'static initget_service_func_t ' + dstFileInfos['initGet'] + ';\n'
 		generatedOutputHandler += 'static doget_service_func_t ' + dstFileInfos['doGet'] + ';\n'
@@ -530,7 +530,7 @@ def generateFilesIndex(dstDir,sourcesMap,target,chuncksNbits,wcBase,propsFilesMa
 
 	# files index creation (table of ordered output_handlers)
 	cOut.write('\n/********** Files index **********/\n')
-	cOut.write('CONST_VAR(const struct output_handler_t /*CONST_VAR*/ *, files_index[]) = {\n')
+	cOut.write('CONST_VAR(const struct output_handler_t /*CONST_VAR*/ *, resources_index[]) = {\n')
 	# insert each handler
 	for file in filesList:
 		cOut.write('\t&' + filesRefs[file] + ',\n')

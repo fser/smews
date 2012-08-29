@@ -24,13 +24,13 @@ core/srv_consts.c
 core/tls.c
 core/tls.h
 tls_integration
-tools/GenContents.py
+tools/GenContents.py (changed: rename structure/variables name)
 
 Files that differ
 -----------------
 changelogs.txt
-core/checksum.c
-core/checksum.h
+core/checksum.c (unchanged because all is inlined now)
+core/checksum.h (unchanged because all is inlined now)
 core/connections.c
 core/connections.h
 core/coroutines.c
@@ -41,9 +41,9 @@ core/handlers.c
 core/handlers.h
 core/input.c
 core/input.h
-core/main.c
-core/memory.c
-core/memory.h
+core/main.c (unchanged)
+core/memory.c (unchanged, new function in develop branch)
+core/memory.h (unchanged, new function in develop branch)
 core/output.c
 core/output.h
 core/smews.c
@@ -69,3 +69,13 @@ targets/skeleton/drivers/target.h
 targets/WSN430/drivers/serial_line.c
 targets/WSN430/drivers/target.h
 tools/GenBlob.py
+
+Changes made
+------------
+- smews.h
+    - Variable *files_index* (tls) renamed *resources_index* (develop)
+        - Keep resources_index
+        - Edit tools/GenContents.py (renamed files_index to resources_index)
+    - Structure *init_service_func_t* (tls) renamed *generator_init_func_t* (develop)
+        - Edit tools/GenContents.py (renamed to generator_init_func_t)
+
