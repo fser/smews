@@ -267,17 +267,20 @@ void smews_send_packet(struct connection *connection) {
 			current_inseqno = connection->protocol.http.current_inseqno;
 		}
 		output_handler = connection->output_handler;
+		/* Missing IFNDEF ?? fser */
 		if(connection->tls_active == 1){
 			UI16(source_port) = TCP_HTTPS_PORT;
 		} else {
 			UI16(source_port) = TCP_HTTP_PORT;
 		}
 	} else {
+	  printf("Not HTTP case (fser) \n");
 		ip_addr = rst_connection.ip_addr;
 		port = rst_connection.port;
 		next_outseqno = rst_connection.next_outseqno;
 		current_inseqno = rst_connection.current_inseqno;
 		output_handler = &ref_rst;
+		/* Missing IFNDEF ?? fser */
 		if(rst_connection.tls_active == 1){
 			UI16(source_port) = TCP_HTTPS_PORT;
 		} else {
@@ -287,11 +290,14 @@ void smews_send_packet(struct connection *connection) {
 	handler_type = CONST_UI8(output_handler->handler_type);
 
 	/* compute the length of the TCP segment to be sent */
+	printf("switch length (fser)Handler_type = ");
 	switch(handler_type) {
 		case type_control:
+		  printf("type_control\n");
 			segment_length = CONST_UI8(GET_CONTROL(output_handler).length);
 			break;
 		case type_file: {
+		  printf("type_file\n");
 			uint16_t max_out_size;
 			uint32_t file_remaining_bytes;
 			max_out_size = MAX_OUT_SIZE(connection->protocol.http.tcp_mss);
@@ -313,11 +319,13 @@ void smews_send_packet(struct connection *connection) {
 			break;
 		}
 		case type_generator:
+		  printf("type_generator\n");
 			segment_length = curr_output.content_length;
 			segment_length += _service_headers_size(curr_output.service_header);
 			break;
 #ifndef DISABLE_GP_IP_HANDLER
 		case type_general_ip_handler:
+		  printf("type_generail_ip_handler\n");
 			/* "cheat" the segment_length variable to reflect what needs to be sent
 			 * the trick is used so that the code below can be reused
 			 */
@@ -327,7 +335,7 @@ void smews_send_packet(struct connection *connection) {
 
 #ifndef DISABLE_TLS
 		case type_tls_handshake:
-
+		  printf("type_tls_handshake\n");
 			switch(connection->tls->tls_state) {
 				case server_hello:
 					/* todo limitation of mss discuss(fie las asa ceea ce nu ar putea fi o pb, fie il fac dynamic content) */
@@ -489,7 +497,7 @@ void smews_send_packet(struct connection *connection) {
 #endif
 
 	/* checksum source port */
-	checksum_add16(UI16(source_port));
+	checksum_add16(UI16(source_port)); /* Must be useless since already given as initializer (fser) */
 	
 	/* checksum destination port */
 	checksum_add16(UI16(port));
@@ -520,6 +528,7 @@ void smews_send_packet(struct connection *connection) {
 					break;
 				case header_chunks:
 					checksum_add16(SERVICE_HTTP_HEADER_CHUNKED_CHK);
+					break; // fser
 				case header_none:
 					checksum_add(0); /* odd bytes alignement */
 					length = curr_output.content_length;
@@ -556,12 +565,12 @@ void smews_send_packet(struct connection *connection) {
 				tls_record = mem_alloc(data_length);
 				tls_record = CONST_READ_NBYTES(tls_record,tmpptr,data_length);
 
-				//printf("Sending %d from a total of %d static file\n",data_length,(output_handler->handler_contents).file.length);
-				/*printf("\n\nTCP data before sending (part of file contents) (%d bytes) :",data_length);
+				printf("Sending %d from a total of %d static file\n",data_length,(output_handler->handler_data).file.length);
+				printf("\n\nTCP data before sending (part of file contents) (%d bytes) :",data_length);
 				for (i = 0 ; i < data_length; i++){
 					printf("%02x", tls_record[i]);
 				}
-				printf("\n");*/
+				printf("\n");
 
 				/* preparing the HMAC hash for calculation */
 				hmac_init(SHA1,connection->tls->server_mac,SHA1_KEYSIZE);
@@ -664,17 +673,24 @@ void smews_send_packet(struct connection *connection) {
 	DEV_PUT16_VAL(TCP_URGP);
 
 	/* start sending HTTP contents */
+	printf("switch (http contents fser) handler_type: ");
 	switch(handler_type) {
 		case type_generator:
+		  printf("type_generator\n");
+		  printf("curr_output.service_header = ");
 			switch(curr_output.service_header) {
+			  
 				case header_standard:
+				  printf("header_standard\n");
 					DEV_PUTN_CONST(serviceHttpHeader, sizeof(serviceHttpHeader)-1);
 					DEV_PUTN(content_length_buffer, CONTENT_LENGTH_SIZE);
 					DEV_PUTN_CONST(serviceHttpHeaderPart2, sizeof(serviceHttpHeaderPart2)-1);
 					break;
 				case header_chunks:
+				  printf("header_chunks\n");
 					DEV_PUTN_CONST(serviceHttpHeaderChunked, sizeof(serviceHttpHeaderChunked)-1);
 				case header_none:
+				  printf("header_none\n");
 					DEV_PUTN(content_length_buffer, CHUNK_LENGTH_SIZE);
 					DEV_PUT16_VAL(0x0d0a);
 					break;
@@ -685,6 +701,7 @@ void smews_send_packet(struct connection *connection) {
 			}
 			break;
 		case type_control:
+		  printf("type_control\n");
 			if(GET_FLAGS(output_handler) & TCP_SYN) {
 				/* Send the syn ack tcp options (MSS) */
 				DEV_PUT16_VAL(MSS_OPT);
@@ -692,6 +709,7 @@ void smews_send_packet(struct connection *connection) {
 			}
 			break;
 		case type_file: {
+		  printf("type_file\n");
 			/* Send the payload of the packet */
 #ifndef DISABLE_TLS
 			if(connection->tls_active == 1){
@@ -706,18 +724,24 @@ void smews_send_packet(struct connection *connection) {
 				DEV_PUT((uint8_t)(record_len));
 
 				/* sending TLS Payload */
-				//printf("Sending TLS data to network (%d bytes)\n ",record_len);
-				for(i = 0; i < (record_len - MAC_KEYSIZE); i++){
+				printf("Sending TLS data to network (%d bytes)\n ",record_len);
+				/* fser
+				  for(i = 0; i < (record_len - MAC_KEYSIZE); i++){
 					DEV_PUT(tls_record[i]);
-					//printf("%02x",tls_record[i]);
+					printf("%02x",tls_record[i]);
 				}
+				*/
+				DEV_PUTN(tls_record, (record_len - MAC_KEYSIZE));
 
 				/* sending MAC */
-				for(i = 0; i < MAC_KEYSIZE; i++){
+				/* fser
+				   for(i = 0; i < MAC_KEYSIZE; i++){
 					DEV_PUT(sha1.buffer[i]);
-					//printf("%02x",sha1.buffer[i]);
+					printf("%02x",sha1.buffer[i]);
 				}
-				//printf("\n");
+				printf("\n");
+				*/
+				DEV_PUTN(sha1.buffer, MAC_KEYSIZE);
 
 				/* free payload allocated for bringing data from external memory */
 				mem_free(tls_record, record_len - MAC_KEYSIZE);
@@ -733,8 +757,10 @@ void smews_send_packet(struct connection *connection) {
 				DEV_PUTN_CONST(tmpptr, segment_length);
 				break;
 			}
+			break; // fser
 			// fser		}
 		default: /* Should never happen but avoid warnings*/
+		  printf("this should never happen (fser)");
 			return;
 	}
 

@@ -512,7 +512,7 @@ char smews_receive(void) {
 
 	DEV_GETC16(tmp_ui16);
 	if(tmp_ui16[S1] != HTTP_PORT) {
-
+	  printf("Connection on port %d\n", UI16(tmp_ui16));
 #ifndef DISABLE_TLS
 		/* check to see if it's TLS */
 		if(UI16(tmp_ui16) == HTTPS_PORT){
